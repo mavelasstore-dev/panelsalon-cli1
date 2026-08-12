@@ -66,6 +66,7 @@ let intentosReconexion = 0;
 let reconectando = false;
 let logoutsSeguidos = 0;        // cuenta logouts en bucle para limpiar sesión corrupta
 let forzarLimpiezaSesion = false; // (bug arreglado: antes no se declaraba → /reset-sesion fallaba)
+let sesionYaLimpiada = false;   // evita el bucle de borrado infinito de sesión
 
 async function conectar() {
   // Evita reconexiones múltiples simultáneas (causa de loops)
@@ -127,7 +128,9 @@ async function conectar() {
 
       if (connection === 'close') {
         const code = lastDisconnect?.error?.output?.statusCode;
+        const motivoErr = lastDisconnect?.error?.message || '';
         estadoConexion.conectado = false;
+        console.log(`🔌 Conexión cerrada (código ${code ?? '?'}${motivoErr ? ' · ' + motivoErr.slice(0, 60) : ''}).`);
 
         // Si estamos forzando limpieza (reset manual), no reanimamos la sesión vieja.
         if (forzarLimpiezaSesion) {
@@ -143,31 +146,33 @@ async function conectar() {
           return;
         }
 
-        // loggedOut (401): distinguir logout real de sesión corrupta en bucle.
+        // loggedOut (401): distinguir un logout REAL (sesión ya vinculada) de
+        // una sesión NUEVA aún sin escanear, o de un rechazo temporal por
+        // reconexiones rápidas. La clave es state.creds.registered: solo una
+        // sesión realmente vinculada tiene registered === true.
         if (code === DisconnectReason.loggedOut) {
-          const teniaSesion = tieneCredenciales();
-          if (teniaSesion) {
-            logoutsSeguidos++;
-            console.log(`🚪 Logout detectado (${logoutsSeguidos}). Borrando sesión corrupta del volumen…`);
+          const estabaVinculado = !!(state?.creds?.registered);
+          if (estabaVinculado && !sesionYaLimpiada) {
+            // Sesión vinculada que quedó inválida (desvinculada o corrupta):
+            // se limpia UNA sola vez y se pasa a modo "esperar QR nuevo".
+            console.log('🚪 Sesión vinculada inválida. Limpiando UNA vez para generar QR nuevo…');
             try { await fs.promises.rm(AUTH_DIR, { recursive: true, force: true }); } catch {}
             try { await fs.promises.mkdir(AUTH_DIR, { recursive: true }); } catch {}
+            sesionYaLimpiada = true;
+            intentosReconexion = 0;
             reconectando = false;
-            const espera = logoutsSeguidos > 3 ? 8000 : 2000;
-            setTimeout(conectar, espera);
-            return;
-          } else {
-            intentosReconexion++;
-            reconectando = false;
-            if (intentosReconexion > 10) {
-              console.log('⏳ Muchos intentos sin QR. Pausa de 30s…');
-              intentosReconexion = 0;
-              setTimeout(conectar, 30000);
-            } else {
-              console.log(`📱 Esperando el QR (intento ${intentosReconexion})… debe aparecer en el panel.`);
-              setTimeout(conectar, 3000);
-            }
+            setTimeout(conectar, 2500);
             return;
           }
+          // Sesión nueva (sin vincular) que se cierra: NO borrar (borrar en bucle
+          // impide que el QR aparezca). Reintentar con backoff creciente para
+          // que WhatsApp emita el QR sin saturar la conexión.
+          intentosReconexion++;
+          reconectando = false;
+          const espera = Math.min(30000, 4000 * intentosReconexion);
+          console.log(`📱 Esperando el QR… reintento #${intentosReconexion} en ${Math.round(espera/1000)}s (escanéalo en el panel).`);
+          setTimeout(conectar, espera);
+          return;
         }
 
         // badSession (500): sesión corrupta → borrar y regenerar
@@ -193,6 +198,7 @@ async function conectar() {
       } else if (connection === 'open') {
         intentosReconexion = 0;  // resetea el contador al conectar bien
         logoutsSeguidos = 0;
+        sesionYaLimpiada = false; // conexión sana: habilita una limpieza futura si hiciera falta
         reconectando = false;
         estadoConexion.conectado = true;
         estadoConexion.qrDataURL = null;
@@ -581,6 +587,7 @@ app.get('/reset-sesion', requiereToken, async (_, res) => {
     intentosReconexion = 0;
     reconectando = false;
     forzarLimpiezaSesion = false;
+    sesionYaLimpiada = false;
     setTimeout(conectar, 1500);
     res.json({ ok: true, mensaje: 'Sesión borrada del volumen. Generando QR nuevo… Abre el panel (Mi negocio) en unos segundos para escanearlo.' });
   } catch (e) {
