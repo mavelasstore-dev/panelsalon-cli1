@@ -164,12 +164,17 @@ async function conectar() {
             setTimeout(conectar, 2500);
             return;
           }
-          // Sesión nueva (sin vincular) que se cierra: NO borrar (borrar en bucle
-          // impide que el QR aparezca). Reintentar con backoff creciente para
-          // que WhatsApp emita el QR sin saturar la conexión.
+          // Sesión nueva (sin vincular) que se cierra con 401: es RECHAZO de
+          // WhatsApp. Si se repite, es rate-limit por demasiados intentos: hay
+          // que ESPACIAR mucho los reintentos para que el número se recupere
+          // (martillar cada pocos segundos mantiene el bloqueo). Los primeros
+          // intentos son rápidos (para mostrar el QR ya si todo está sano);
+          // luego el backoff sube hasta 4 minutos.
           intentosReconexion++;
           reconectando = false;
-          const espera = Math.min(30000, 4000 * intentosReconexion);
+          const espera = intentosReconexion <= 3
+            ? 5000
+            : Math.min(240000, 20000 * (intentosReconexion - 3)); // hasta 4 min
           console.log(`📱 Esperando el QR… reintento #${intentosReconexion} en ${Math.round(espera/1000)}s (escanéalo en el panel).`);
           setTimeout(conectar, espera);
           return;
