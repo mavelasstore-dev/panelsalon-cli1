@@ -21,6 +21,8 @@ Este es el producto REAL: panel + agente de WhatsApp que agenda solo, confirma c
 
 1. Entra a **https://supabase.com**, crea un proyecto nuevo (gratis).
 2. Ve a **SQL Editor** → pega TODO el contenido de `backend/schema.sql` → **Run**.
+   Luego pega también `backend/migracion_v3.sql` → **Run** (agrega el soporte
+   de handoff humano; no borra nada). Ver detalles en `backend/MEJORAS.md`.
 3. Ve a **Project Settings → API** y copia:
    - **URL** del proyecto (ej: `https://xxxxx.supabase.co`)
    - **anon public key** (para el panel)

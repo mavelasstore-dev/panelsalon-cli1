@@ -18,14 +18,15 @@
 //    antes de que caiga el baneo.
 // ============================================================
 
-// ---------- CONFIG (ajustable) ----------
+// ---------- CONFIG (ajustable por variables de entorno) ----------
+const numEnv = (k, def) => { const v = Number(process.env[k]); return Number.isFinite(v) && v > 0 ? v : def; };
 const CONFIG = {
-  maxPorHora: 25,          // < 30/h recomendado
-  maxPorDiaBase: 200,      // tope diario cuando ya está "caliente"
-  warmupDias: 7,           // días de calentamiento de número nuevo
-  warmupInicial: 40,       // mensajes/día el día 1 de un número nuevo
-  minDelayMs: 1600,        // nunca responder más rápido que esto
-  maxDelayMs: 7000,        // tope de espera
+  maxPorHora: numEnv('ANTIBAN_MAX_HORA', 25),          // < 30/h recomendado
+  maxPorDiaBase: numEnv('ANTIBAN_MAX_DIA', 200),       // tope diario cuando ya está "caliente"
+  warmupDias: numEnv('ANTIBAN_WARMUP_DIAS', 7),        // días de calentamiento de número nuevo
+  warmupInicial: numEnv('ANTIBAN_WARMUP_INICIAL', 40), // mensajes/día el día 1 de un número nuevo
+  minDelayMs: numEnv('ANTIBAN_MIN_DELAY', 1600),       // nunca responder más rápido que esto
+  maxDelayMs: numEnv('ANTIBAN_MAX_DELAY', 7000),       // tope de espera
   ventanaNoche: [22, 7],   // horas [inicio, fin] de "noche" (más lento)
 };
 
@@ -38,9 +39,29 @@ const estado = {
   salud: { desconexiones: 0, errores403: 0, ultimoError: null }
 };
 
+// Persistimos la fecha de "nacimiento" del número en el volumen para que el
+// warmup NO se reinicie en cada deploy (si no, un número viejo se trataría
+// como nuevo tras cada reinicio). Se guarda junto a la sesión de WhatsApp.
+import fs from 'fs';
+const WARMUP_FILE = (process.env.AUTH_DIR || '/app/auth') + '/antiban.json';
+
 export function initAntiban() {
-  estado.fechaInicio = Date.now();
-  console.log('🛡️  Anti-ban activo. Modo warmup los primeros ' + CONFIG.warmupDias + ' días.');
+  try {
+    const raw = fs.readFileSync(WARMUP_FILE, 'utf8');
+    const j = JSON.parse(raw);
+    if (j?.fechaInicio) estado.fechaInicio = j.fechaInicio;
+  } catch { /* primera vez: no existe */ }
+
+  if (!estado.fechaInicio) {
+    estado.fechaInicio = Date.now();
+    try {
+      fs.mkdirSync((process.env.AUTH_DIR || '/app/auth'), { recursive: true });
+      fs.writeFileSync(WARMUP_FILE, JSON.stringify({ fechaInicio: estado.fechaInicio }));
+    } catch { /* si no hay volumen, seguimos en memoria */ }
+  }
+
+  const dias = Math.floor((Date.now() - estado.fechaInicio) / 86400000);
+  console.log(`🛡️  Anti-ban activo. Día ${dias} del número. ${dias < CONFIG.warmupDias ? 'En warmup.' : 'Warmup completado.'}`);
 }
 
 // ---------- WARMUP: límite diario según antigüedad del número ----------
