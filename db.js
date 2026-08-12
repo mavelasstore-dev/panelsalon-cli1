@@ -4,13 +4,21 @@
 
 import { createClient } from '@supabase/supabase-js';
 
-if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_KEY) {
-  console.error('❌ Faltan SUPABASE_URL o SUPABASE_SERVICE_KEY en las variables de entorno.');
+const SUPABASE_URL = process.env.SUPABASE_URL;
+const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
+export const SUPABASE_OK = !!(SUPABASE_URL && SUPABASE_SERVICE_KEY);
+
+if (!SUPABASE_OK) {
+  console.error('❌ Faltan SUPABASE_URL o SUPABASE_SERVICE_KEY. El agente arranca (WhatsApp/QR funcionan), '
+    + 'pero NO podrá leer config ni guardar conversaciones hasta configurarlas en Railway.');
 }
 
+// Usamos placeholders si faltan las claves para que el proceso NO crashee al
+// importar (antes: "supabaseUrl is required" tumbaba todo el backend en el boot).
+// Las consultas fallarán de forma controlada (capturadas en cada función).
 export const supa = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_KEY  // service key en el backend (más permisos que la anon)
+  SUPABASE_URL || 'https://placeholder.supabase.co',
+  SUPABASE_SERVICE_KEY || 'placeholder-key'  // service key en el backend (más permisos que la anon)
 );
 
 // Zona horaria del negocio (configurable). Colombia no tiene horario de verano,
